@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Model MQTT Controller</title>
+
+  <!-- Google Model Viewer -->
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+
+  <!-- MQTT -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <!-- Howler (Audio) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      background: #444;
+      overflow: hidden;
+    }
+
+    model-viewer {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .ar-btn {
+      position: absolute;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 14px 28px;
+
+      border-radius: 28px;
+      border: none;
+
+      background: linear-gradient(135deg, #00c6ff, #0072ff);
+      color: #ffffff;
+
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+
+      box-shadow: 0 10px 30px rgba(0, 114, 255, 0.5);
+      cursor: pointer;
+
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      transition: all 0.2s ease;
+    }
+
+    .ar-btn:hover {
+      transform: translateX(-50%) scale(1.05);
+      box-shadow: 0 14px 35px rgba(0, 114, 255, 0.65);
+    }
+
+    .ar-btn:active {
+      transform: translateX(-50%) scale(0.97);
+    }
+  </style>
+</head>
+
+<body>
+
+  <model-viewer id="model" src="https://4dyemark6yi5q1rf.public.blob.vercel-storage.com/printerModel.glb"
+    camera-controls disable-zoom exposure="1.1" shadow-intensity="1.3" environment-image="neutral" loading="eager" ar
+    ar-modes="scene-viewer webxr quick-look" ar-scale="fixed" ar-placement="floor">
+
+    <!-- AR BUTTON -->
+    <button slot="ar-button" class="ar-btn">
+  🧊 View in AR
+</button>
+
+
+  </model-viewer>
+
+
+
+  <script>
+    const viewer = document.getElementById("model");
+
+    /* ================= AUDIO ================= */
+
+    const stepSounds = {
+      "1": new Howl({ src: ['sounds/step1.mp3'] }),
+      "2": new Howl({ src: ['sounds/step2.mp3'] }),
+      "3": new Howl({ src: ['sounds/step3.mp3'] }),
+      "4": new Howl({ src: ['sounds/step4.mp3'] }),
+      "5": new Howl({ src: ['sounds/step5.mp3'] }),
+      "6": new Howl({ src: ['sounds/step6.mp3'] }),
+      "7": new Howl({ src: ['sounds/step7.mp3'] })
+    };
+
+    /* ================= SPEED CONTROL ================= */
+
+    const speedMap = {
+      "1": 1.5,
+      "2": 2.0,
+      "3": 2.5,
+      "4": 3.0,
+      "5": 3.5,
+      "6": 4.0,
+      "7": 4.5
+    };
+
+    /* ================= SOUND DELAY CONTROL ================= */
+
+    const soundDelayMap = {
+      "1": 0,     // ms
+      "2": 1000,
+      "3": 3000,
+      "4": 4000,
+      "5": 5000,
+      "6": 6000,
+      "7": 7000
+    };
+
+    /* ================= MQTT ================= */
+
+    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
+
+    client.on("connect", () => {
+      console.log("MQTT Connected");
+      client.subscribe("Equanimous/AR/sensor");
+    });
+
+    /* ================= CONTROL ================= */
+
+    let lastCommand = null;
+    let playing = false;
+    let stopWatcher = null;
+
+    /* ================= STOP EVERYTHING ================= */
+
+    function stopAll() {
+      viewer.pause();
+      Object.values(stepSounds).forEach(s => s.stop());
+      playing = false;
+      if (stopWatcher) cancelAnimationFrame(stopWatcher);
+    }
+
+    /* ================= HARD STOP AT END ================= */
+
+    function stopAtEnd() {
+      if (!viewer.duration) {
+        stopWatcher = requestAnimationFrame(stopAtEnd);
+        return;
+      }
+
+      if (viewer.currentTime >= viewer.duration - 0.02) {
+        viewer.pause();
+        playing = false;
+        return;
+      }
+
+      stopWatcher = requestAnimationFrame(stopAtEnd);
+    }
+
+    /* ================= PLAY ================= */
+
+    function playOnce(anim, key) {
+
+      if (playing) return;
+      playing = true;
+
+      stopAll();
+
+      viewer.animationName = anim;
+      viewer.currentTime = 0;
+
+      // Animation speed control
+      viewer.animationSpeed = speedMap[key] || 2.0;
+
+      viewer.play();
+
+      // Sound with delay
+      const delay = soundDelayMap[key] || 0;
+      if (stepSounds[key]) {
+        setTimeout(() => {
+          stepSounds[key].stop();
+          stepSounds[key].play();
+        }, delay);
+      }
+
+      requestAnimationFrame(stopAtEnd);
+    }
+
+    /* ================= MQTT HANDLER ================= */
+
+    client.on("message", (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        const key = String(data.Numpad);
+
+        if (key === lastCommand) return;
+        lastCommand = key;
+
+        switch (key) {
+          case "1": playOnce("step01", "1"); break;
+          case "2": playOnce("step02", "2"); break;
+          case "3": playOnce("step03", "3"); break;
+          case "4": playOnce("step04", "4"); break;
+          case "5": playOnce("step05", "5"); break;
+          case "6": playOnce("step06", "6"); break;
+          case "7": playOnce("step07", "7"); break;
+          case "0": stopAll(); break;
+        }
+
+      } catch (e) {
+        console.warn("JSON Error:", e);
+      }
+    });
+  </script>
+
+
+</body>
+
+</html>
