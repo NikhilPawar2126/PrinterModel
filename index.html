@@ -28,7 +28,7 @@
 
     .ar-btn {
       position: fixed;
-      top: 14px;
+      bottom: 14px;
       right: 14px;
       padding: 10px 14px;
       background: rgba(0,0,0,0.6);
@@ -60,7 +60,7 @@
   animation-loop="false">
 </model-viewer>
 
-<button id="arBtn" class="ar-btn">Enter AR</button>
+<button id="arBtn" class="ar-btn">View in AR</button>
 
 <script>
 const viewer = document.getElementById("model");
@@ -112,11 +112,18 @@ let playing = false;
 let rafId = null;
 
 function stopAll() {
+  // Stop any running animation & sound
   viewer.pause();
   Object.values(stepSounds).forEach(s => s.stop());
   playing = false;
   if (rafId) cancelAnimationFrame(rafId);
+
+  // 🔑 RESET TO INITIAL POSITION (STEP 01)
+  viewer.animationName = "step01";
+  viewer.currentTime = 0;
+  viewer.pause();
 }
+
 
 function stopAtEnd() {
   if (!viewer.duration) {
