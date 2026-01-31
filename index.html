@@ -66,97 +66,76 @@
 const viewer = document.getElementById("model");
 
 /* ================= AUDIO ================= */
-const stepSounds = {
-  "1": new Howl({ src: ['sounds/step1.mp3'] }),
-  "2": new Howl({ src: ['sounds/step2.mp3'] }),
-  "3": new Howl({ src: ['sounds/step3.mp3'] }),
-  "4": new Howl({ src: ['sounds/step4.mp3'] }),
-  "5": new Howl({ src: ['sounds/step5.mp3'] }),
-  "6": new Howl({ src: ['sounds/step6.mp3'] }),
-  "7": new Howl({ src: ['sounds/step7.mp3'] })
+const sounds = {
+  "1": new Howl({ src: ["sounds/step1.mp3"] }),
+  "2": new Howl({ src: ["sounds/step2.mp3"] }),
+  "3": new Howl({ src: ["sounds/step3.mp3"] }),
+  "4": new Howl({ src: ["sounds/step4.mp3"] }),
+  "5": new Howl({ src: ["sounds/step5.mp3"] }),
+  "6": new Howl({ src: ["sounds/step6.mp3"] }),
+  "7": new Howl({ src: ["sounds/step7.mp3"] })
 };
 
 /* ================= SPEED ================= */
 const speedMap = {
-  "1": 1.6,
-  "2": 2.0,
-  "3": 2.8,
-  "4": 2.0,
-  "5": 3.0,
-  "6": 1.9,
-  "7": 2.5
+  "1": 1.6, "2": 2.0, "3": 2.8,
+  "4": 2.0, "5": 3.0, "6": 1.9, "7": 2.5
 };
 
 /* ================= SOUND DELAY ================= */
-const soundDelayMap = {
-  "1": 0,
-  "2": 1000,
-  "3": 3000,
-  "4": 4000,
-  "5": 5000,
-  "6": 6000,
-  "7": 7000
+const soundDelay = {
+  "1": 0, "2": 1000, "3": 3000,
+  "4": 4000, "5": 5000, "6": 6000, "7": 7000
 };
 
 /* ================= MQTT ================= */
 const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
+client.on("connect", () => client.subscribe("Equanimous/AR/sensor"));
 
-client.on("connect", () => {
-  console.log("MQTT Connected");
-  client.subscribe("Equanimous/AR/sensor");
-});
-
-/* ================= CONTROL ================= */
-let lastCommand = null;
+/* ================= AR-SAFE STATE ================= */
+let lastKey = null;
 let playing = false;
-let rafId = null;
+let playSessionId = 0;
+let lastPlayTime = 0;
 
-function stopAll() {
-  viewer.pause();
-  Object.values(stepSounds).forEach(s => s.stop());
-  playing = false;
-  if (rafId) cancelAnimationFrame(rafId);
-}
+const MIN_INTERVAL = 1200; // ms (CRITICAL for AR)
 
-function stopAtEnd() {
-  if (!viewer.duration) {
-    rafId = requestAnimationFrame(stopAtEnd);
-    return;
-  }
-
-  if (viewer.currentTime >= viewer.duration - 0.03) {
-    viewer.pause();
-    playing = false;
-    return;
-  }
-  rafId = requestAnimationFrame(stopAtEnd);
-}
-
+/* ================= PLAY ONCE (AR-PROOF) ================= */
 function playOnce(anim, key) {
-  if (playing) return;
+  const now = Date.now();
+
+  // 🔒 HARD DEBOUNCE (fixes 2–3x AR trigger)
+  if (playing || (now - lastPlayTime < MIN_INTERVAL)) return;
+
   playing = true;
+  lastPlayTime = now;
+  playSessionId++;
+  const session = playSessionId;
 
-  stopAll();
-
+  viewer.pause();
   viewer.animationName = anim;
   viewer.currentTime = 0;
   viewer.animationSpeed = speedMap[key] || 2;
   viewer.play();
 
-  const delay = soundDelayMap[key] || 0;
-  if (stepSounds[key]) {
-    setTimeout(() => stepSounds[key].play(), delay);
+  if (sounds[key]) {
+    setTimeout(() => sounds[key].play(), soundDelay[key] || 0);
   }
 
-  requestAnimationFrame(stopAtEnd);
+  // 🔒 SAFE UNLOCK (AR can fire finish twice)
+  viewer.addEventListener("animation-finished", function onEnd() {
+    if (session !== playSessionId) return;
+    playing = false;
+    viewer.removeEventListener("animation-finished", onEnd);
+  }, { once: true });
 }
 
 /* ================= MQTT HANDLER ================= */
 client.on("message", (_, msg) => {
   try {
     const key = String(JSON.parse(msg).Numpad);
-    if (key === lastCommand) return;
-    lastCommand = key;
+    if (key === lastKey) return;
+    lastKey = key;
 
     switch (key) {
       case "1": playOnce("step01","1"); break;
@@ -166,20 +145,20 @@ client.on("message", (_, msg) => {
       case "5": playOnce("step05","5"); break;
       case "6": playOnce("step06","6"); break;
       case "7": playOnce("step07","7"); break;
-      case "0": stopAll(); break;
+      case "0":
+        viewer.pause();
+        playing = false;
+        break;
     }
   } catch {}
 });
 
 /* ================= AR BUTTON ================= */
 document.getElementById("arBtn").addEventListener("click", async () => {
-  if (viewer.canActivateAR) {
-    await viewer.activateAR();
-  } else {
-    alert("WebXR AR not supported on this device");
-  }
+  if (viewer.canActivateAR) await viewer.activateAR();
 });
 </script>
+
 
 </body>
 </html>
