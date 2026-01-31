@@ -1,10 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>3D Model MQTT + AR</title>
+  <title>3D Model MQTT + WebXR AR</title>
 
   <!-- Model Viewer -->
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
@@ -27,16 +26,15 @@
       height: 100vh;
     }
 
-    /* AR BUTTON */
     .ar-btn {
       position: fixed;
-      bottom: 16px;
-      right: 16px;
-      padding: 10px 16px;
+      top: 14px;
+      right: 14px;
+      padding: 10px 14px;
       background: rgba(0,0,0,0.6);
       color: white;
-      border: 1px solid rgba(255,255,255,1.4);
-      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.5);
+      border-radius: 8px;
       cursor: pointer;
       z-index: 9999;
     }
@@ -56,21 +54,18 @@
   loading="eager"
 
   ar
-  ar-animation
-  ar-modes="scene-viewer webxr quick-look"
+  ar-modes="webxr"
   ar-scale="auto"
   ar-placement="floor"
   animation-loop="false">
 </model-viewer>
 
-
-<button id="arBtn" class="ar-btn">View in AR</button>
+<button id="arBtn" class="ar-btn">Enter AR</button>
 
 <script>
 const viewer = document.getElementById("model");
-const arBtn = document.getElementById("arBtn");
-/* ================= AUDIO ================= */
 
+/* ================= AUDIO ================= */
 const stepSounds = {
   "1": new Howl({ src: ['sounds/step1.mp3'] }),
   "2": new Howl({ src: ['sounds/step2.mp3'] }),
@@ -81,8 +76,7 @@ const stepSounds = {
   "7": new Howl({ src: ['sounds/step7.mp3'] })
 };
 
-/* ================= SPEED CONTROL ================= */
-
+/* ================= SPEED ================= */
 const speedMap = {
   "1": 1.6,
   "2": 2.0,
@@ -93,10 +87,9 @@ const speedMap = {
   "7": 2.5
 };
 
-/* ================= SOUND DELAY CONTROL ================= */
-
+/* ================= SOUND DELAY ================= */
 const soundDelayMap = {
-  "1": 0,     // ms
+  "1": 0,
   "2": 1000,
   "3": 3000,
   "4": 4000,
@@ -106,7 +99,6 @@ const soundDelayMap = {
 };
 
 /* ================= MQTT ================= */
-
 const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
 
 client.on("connect", () => {
@@ -115,41 +107,32 @@ client.on("connect", () => {
 });
 
 /* ================= CONTROL ================= */
-
 let lastCommand = null;
 let playing = false;
-let stopWatcher = null;
-
-/* ================= STOP EVERYTHING ================= */
+let rafId = null;
 
 function stopAll() {
   viewer.pause();
   Object.values(stepSounds).forEach(s => s.stop());
   playing = false;
-  if (stopWatcher) cancelAnimationFrame(stopWatcher);
+  if (rafId) cancelAnimationFrame(rafId);
 }
-
-/* ================= HARD STOP AT END ================= */
 
 function stopAtEnd() {
   if (!viewer.duration) {
-    stopWatcher = requestAnimationFrame(stopAtEnd);
+    rafId = requestAnimationFrame(stopAtEnd);
     return;
   }
 
-  if (viewer.currentTime >= viewer.duration - 0.02) {
+  if (viewer.currentTime >= viewer.duration - 0.03) {
     viewer.pause();
     playing = false;
     return;
   }
-
-  stopWatcher = requestAnimationFrame(stopAtEnd);
+  rafId = requestAnimationFrame(stopAtEnd);
 }
 
-/* ================= PLAY ================= */
-
 function playOnce(anim, key) {
-
   if (playing) return;
   playing = true;
 
@@ -157,62 +140,46 @@ function playOnce(anim, key) {
 
   viewer.animationName = anim;
   viewer.currentTime = 0;
-
-  // Animation speed control
-  viewer.animationSpeed = speedMap[key] || 2.0;
-
+  viewer.animationSpeed = speedMap[key] || 2;
   viewer.play();
 
-  // Sound with delay
   const delay = soundDelayMap[key] || 0;
   if (stepSounds[key]) {
-    setTimeout(() => {
-      stepSounds[key].stop();
-      stepSounds[key].play();
-    }, delay);
+    setTimeout(() => stepSounds[key].play(), delay);
   }
 
   requestAnimationFrame(stopAtEnd);
 }
 
 /* ================= MQTT HANDLER ================= */
-
-client.on("message", (topic, message) => {
+client.on("message", (_, msg) => {
   try {
-    const data = JSON.parse(message.toString());
-    const key = String(data.Numpad);
-
+    const key = String(JSON.parse(msg).Numpad);
     if (key === lastCommand) return;
     lastCommand = key;
 
     switch (key) {
-      case "1": playOnce("step01", "1"); break;
-      case "2": playOnce("step02", "2"); break;
-      case "3": playOnce("step03", "3"); break;
-      case "4": playOnce("step04", "4"); break;
-      case "5": playOnce("step05", "5"); break;
-      case "6": playOnce("step06", "6"); break;
-      case "7": playOnce("step07", "7"); break;
+      case "1": playOnce("step01","1"); break;
+      case "2": playOnce("step02","2"); break;
+      case "3": playOnce("step03","3"); break;
+      case "4": playOnce("step04","4"); break;
+      case "5": playOnce("step05","5"); break;
+      case "6": playOnce("step06","6"); break;
+      case "7": playOnce("step07","7"); break;
       case "0": stopAll(); break;
     }
-
-  } catch (e) {
-    console.warn("JSON Error:", e);
-  }
+  } catch {}
 });
+
 /* ================= AR BUTTON ================= */
-arBtn.addEventListener("click", async () => {
-  try {
-    // Check if AR is supported
-    if (viewer.canActivateAR) {
-      await viewer.activateAR();
-    } else {
-      alert("AR is not supported on this device/browser.");
-    }
-  } catch (err) {
-    console.error("AR activation failed:", err);
+document.getElementById("arBtn").addEventListener("click", async () => {
+  if (viewer.canActivateAR) {
+    await viewer.activateAR();
+  } else {
+    alert("WebXR AR not supported on this device");
   }
 });
 </script>
+
 </body>
 </html>
